@@ -1,500 +1,104 @@
 # Normal distribution
 
-**PDF**  
-```math
-f(x) = \frac{1}{\sigma\sqrt{2\pi}} \exp\!\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)
-Mean: $\mu$
-Std dev: $\sigma$
-Skew: 0
-Kurtosis: 3
+PDF:  
+f(x) = (1/(s*sqrt(2*pi))) * exp(-(x-m)^2 / (2*s^2))
 
-Student t distribution
-Parameters: degrees of freedom $\nu > 0$, location $\mu$, scale $\sigma > 0$.
+Mean = m  
+Std dev = s  
+Skew = 0  
+Kurtosis = 3  
 
-PDF
+---
 
-𝑓
-(
-𝑥
-)
-=
-Γ
- ⁣
-(
-𝜈
-+
-1
-2
-)
-Γ
- ⁣
-(
-𝜈
-2
-)
-𝜈
-𝜋
- 
-𝜎
-(
-1
-+
-(
-𝑥
-−
-𝜇
-)
-2
-𝜈
-𝜎
-2
-)
-−
-(
-𝜈
-+
-1
-)
-/
-2
-f(x)= 
-Γ( 
-2
-ν
-​
- ) 
-νπ
-​
- σ
-Γ( 
-2
-ν+1
-​
- )
-​
- (1+ 
-νσ 
-2
- 
-(x−μ) 
-2
- 
-​
- ) 
-−(ν+1)/2
- 
-Mean: $\mu$ (exists if $\nu > 1$)
-Std dev: $\sigma\sqrt{\tfrac{\nu}{\nu-2}}$ (exists if $\nu > 2$)
-Skew: 0 (exists if $\nu > 3$)
-Kurtosis: $3\frac{\nu-2}{\nu-4}$ (exists if $\nu > 4$)
+# Student t distribution
 
-Logistic distribution
-Parameters: location $\mu$, scale $s > 0$.
+Parameters: v > 0 (degrees of freedom), location m, scale s > 0
 
-PDF
+PDF:  
+f(x) = [ Gamma((v+1)/2) / (Gamma(v/2)*sqrt(v*pi)*s) ] * (1 + ((x-m)^2)/(v*s^2))^(-(v+1)/2)
 
-𝑓
-(
-𝑥
-)
-=
-𝑒
-−
-(
-𝑥
-−
-𝜇
-)
-/
-𝑠
-𝑠
-(
-1
-+
-𝑒
-−
-(
-𝑥
-−
-𝜇
-)
-/
-𝑠
-)
-2
-=
-1
-4
-𝑠
- 
-s
-e
-c
-h
-2
- ⁣
-(
-𝑥
-−
-𝜇
-2
-𝑠
-)
-f(x)= 
-s(1+e 
-−(x−μ)/s
- ) 
-2
- 
-e 
-−(x−μ)/s
- 
-​
- = 
-4s
-1
-​
- sech 
-2
- ( 
-2s
-x−μ
-​
- )
-Mean: $\mu$
-Std dev: $\tfrac{\pi}{\sqrt{3}}s$
-Skew: 0
-Kurtosis: $\tfrac{21}{5} = 4.2$
+Mean = m   (exists if v > 1)  
+Std dev = s*sqrt(v/(v-2))   (exists if v > 2)  
+Skew = 0   (exists if v > 3)  
+Kurtosis = 3*(v-2)/(v-4)   (exists if v > 4)  
 
-Hyperbolic secant distribution
-Parameters: location $\mu$, scale $s > 0$.
+---
 
-PDF
+# Logistic distribution
 
-𝑓
-(
-𝑥
-)
-=
-1
-2
-𝑠
- 
-s
-e
-c
-h
- ⁣
-(
-𝜋
-(
-𝑥
-−
-𝜇
-)
-2
-𝑠
-)
-f(x)= 
-2s
-1
-​
- sech( 
-2s
-π(x−μ)
-​
- )
-Mean: $\mu$
-Std dev: $s$
-Skew: 0
-Kurtosis: 5
+Parameters: location m, scale s > 0
 
-Lognormal distribution
-Let $\ln X \sim \mathcal{N}(\mu,\sigma^2)$, with $\sigma > 0$.
+PDF:  
+f(x) = exp(-(x-m)/s) / ( s * (1 + exp(-(x-m)/s))^2 )  
+= (1/(4*s)) * sech^2((x-m)/(2*s))
 
-PDF (for $x > 0$)
+Mean = m  
+Std dev = (pi/sqrt(3))*s  
+Skew = 0  
+Kurtosis = 21/5 = 4.2  
 
-𝑓
-(
-𝑥
-)
-=
-1
-𝑥
-𝜎
-2
-𝜋
-exp
-⁡
- ⁣
-(
-−
-(
-ln
-⁡
-𝑥
-−
-𝜇
-)
-2
-2
-𝜎
-2
-)
-f(x)= 
-xσ 
-2π
-​
- 
-1
-​
- exp(− 
-2σ 
-2
- 
-(lnx−μ) 
-2
- 
-​
- )
-Mean: $\exp(\mu + \tfrac{1}{2}\sigma^2)$
-Std dev: $\sqrt{(e^{\sigma^2}-1)e^{2\mu+\sigma^2}}$
-Skew: $(e^{\sigma^2}+2)\sqrt{e^{\sigma^2}-1}$
-Kurtosis: $e^{4\sigma^2}+2e^{3\sigma^2}+3e^{2\sigma^2}-3$
+---
 
-Log-logistic distribution
-Parameters: scale $\alpha > 0$, shape $\beta > 0$.
+# Hyperbolic secant distribution
 
-PDF (for $x > 0$)
+Parameters: location m, scale s > 0
 
-𝑓
-(
-𝑥
-)
-=
-𝛽
-𝛼
-(
-𝑥
-/
-𝛼
-)
-𝛽
-−
-1
-(
-1
-+
-(
-𝑥
-/
-𝛼
-)
-𝛽
-)
-2
-f(x)= 
-α
-β
-​
-  
-(1+(x/α) 
-β
- ) 
-2
- 
-(x/α) 
-β−1
- 
-​
- 
-Mean (exists if $\beta > 1$):
+PDF:  
+f(x) = (1/(2*s)) * sech( pi*(x-m)/(2*s) )
 
-𝐸
-[
-𝑋
-]
-=
-𝛼
-𝜋
-/
-𝛽
-sin
-⁡
-(
-𝜋
-/
-𝛽
-)
-E[X]=α 
-sin(π/β)
-π/β
-​
- 
-Variance (exists if $\beta > 2$):
+Mean = m  
+Std dev = s  
+Skew = 0  
+Kurtosis = 5  
 
-V
-a
-r
-[
-𝑋
-]
-=
-𝛼
-2
-(
-2
-𝜋
-/
-𝛽
-sin
-⁡
-(
-2
-𝜋
-/
-𝛽
-)
-−
-(
-𝜋
-/
-𝛽
-sin
-⁡
-(
-𝜋
-/
-𝛽
-)
-)
-2
-)
-Var[X]=α 
-2
- ( 
-sin(2π/β)
-2π/β
-​
- −( 
-sin(π/β)
-π/β
-​
- ) 
-2
- )
-Skew (exists if $\beta > 3$): computed from raw moments.
-Kurtosis (exists if $\beta > 4$): computed from raw moments.
+---
 
-Log hyperbolic secant distribution
-Let $\ln X \sim \mathrm{sech}(\mu,s)$. Then raw moments exist for $\lvert ks \rvert < \tfrac{\pi}{2}$:
+# Lognormal distribution
 
-𝐸
-[
-𝑋
-𝑘
-]
-=
-𝑒
-𝑘
-𝜇
-sec
-⁡
-(
-𝑘
-𝑠
-)
-.
-E[X 
-k
- ]=e 
-kμ
- sec(ks).
-PDF (for $x > 0$):
+Let ln(X) ~ Normal(m, s^2), with s > 0
 
-𝑓
-(
-𝑥
-)
-=
-1
-2
-𝑥
-𝑠
- 
-s
-e
-c
-h
- ⁣
-(
-𝜋
-(
-ln
-⁡
-𝑥
-−
-𝜇
-)
-2
-𝑠
-)
-f(x)= 
-2xs
-1
-​
- sech( 
-2s
-π(lnx−μ)
-​
- )
-Mean (exists if $\lvert s \rvert < \tfrac{\pi}{2}$):
+PDF (x > 0):  
+f(x) = (1/(x*s*sqrt(2*pi))) * exp(-(ln x - m)^2 / (2*s^2))
 
-𝐸
-[
-𝑋
-]
-=
-𝑒
-𝜇
-sec
-⁡
-(
-𝑠
-)
-E[X]=e 
-μ
- sec(s)
-Variance (exists if $\lvert 2s \rvert < \tfrac{\pi}{2}$):
+Mean = exp(m + s^2/2)  
+Std dev = sqrt( (exp(s^2)-1) * exp(2*m + s^2) )  
+Skew = (exp(s^2)+2) * sqrt(exp(s^2)-1)  
+Kurtosis = exp(4*s^2) + 2*exp(3*s^2) + 3*exp(2*s^2) - 3  
 
-V
-a
-r
-[
-𝑋
-]
-=
-𝑒
-2
-𝜇
-(
-sec
-⁡
-(
-2
-𝑠
-)
-−
-sec
-⁡
-2
-(
-𝑠
-)
-)
-Var[X]=e 
-2μ
- (sec(2s)−sec 
-2
- (s))
-Skew (exists if $\lvert 3s \rvert < \tfrac{\pi}{2}$) and Kurtosis (exists if $\lvert 4s \rvert < \tfrac{\pi}{2}$) follow from the raw-moment formulas.
+---
+
+# Log-logistic distribution
+
+Parameters: scale a > 0, shape b > 0
+
+PDF (x > 0):  
+f(x) = (b/a) * (x/a)^(b-1) / (1+(x/a)^b)^2
+
+Mean (exists if b > 1):  
+E[X] = a * ( (pi/b) / sin(pi/b) )
+
+Variance (exists if b > 2):  
+Var[X] = a^2 * ( (2*pi/b)/sin(2*pi/b) - ((pi/b)/sin(pi/b))^2 )
+
+Skew (exists if b > 3): computed from raw moments  
+Kurtosis (exists if b > 4): computed from raw moments  
+
+---
+
+# Log hyperbolic secant distribution
+
+Let ln(X) ~ hyperbolic secant with location m and scale s.  
+For |k*s| < pi/2:  
+E[X^k] = exp(k*m) * sec(k*s)
+
+PDF (x > 0):  
+f(x) = (1/(2*x*s)) * sech( pi*(ln x - m)/(2*s) )
+
+Mean (exists if |s| < pi/2):  
+E[X] = exp(m) * sec(s)
+
+Variance (exists if |2*s| < pi/2):  
+Var[X] = exp(2*m) * ( sec(2*s) - sec(s)^2 )
+
+Skew (exists if |3*s| < pi/2) and Kurtosis (exists if |4*s| < pi/2) follow from raw moments
+
