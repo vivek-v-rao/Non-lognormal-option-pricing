@@ -1,5 +1,5 @@
 # Non-lognormal option pricing
-Option prices and implied volatilities for terminal price distributions other than lognormal
+Option prices and implied volatilities for various distributions of the terminal price, such as the [lognormal](https://en.wikipedia.org/wiki/Log-normal_distribution), [normal](https://en.wikipedia.org/wiki/Normal_distribution), [Student's t](https://en.wikipedia.org/wiki/Student%27s_t-distribution), [logistic](https://en.wikipedia.org/wiki/Logistic_distribution), [hyperbolic secant](https://en.wikipedia.org/wiki/Hyperbolic_secant_distribution), [log-logistic](https://en.wikipedia.org/wiki/Log-logistic_distribution), and log hyperbolic secant.
 
 ![Alt text](/implied_vol.png)
 ![Alt text](/densities.png)
