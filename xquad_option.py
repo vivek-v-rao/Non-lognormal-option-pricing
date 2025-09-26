@@ -69,8 +69,8 @@ class QuadDistribution:
         value = self.quantile_fn(prob)
         return 0.0 if not np.isfinite(value) else max(0.0, value)
 
-    def summary(self) -> dict[str, float | str]:
-        """Summarize moments and support proxies for reporting."""
+    def summary(self, quantiles: Sequence[float]) -> dict[str, float | str]:
+        """Summarize moments and requested quantiles for reporting."""
         mean = self.raw_moment(1)
         second = self.raw_moment(2)
         variance = second - mean ** 2
@@ -83,18 +83,36 @@ class QuadDistribution:
         else:
             skew = float("nan")
             kurtosis = float("nan")
-        max_quantile = self.quantile(0.999)
-        if not np.isfinite(max_quantile) or max_quantile <= 0.0:
-            max_quantile = mean + 6.0 * std if std > 0 else mean
-        return {
+        def format_label(q: float) -> str:
+            text = f"q_{q:.3f}"
+            text = text.rstrip('0').rstrip('.')
+            return text if text else 'q_0'
+
+        quantile_values: dict[str, float] = {}
+        for q in sorted({float(q) for q in quantiles}):
+            if not 0.0 <= q <= 1.0:
+                continue
+            label = format_label(q)
+            value = self.quantile(q)
+            if not np.isfinite(value):
+                if q <= self.cdf_at_zero:
+                    value = 0.0
+                elif std > 0:
+                    spread = 6.0 * std
+                    value = max(0.0, mean - spread) if q < 0.5 else mean + spread
+                else:
+                    value = mean
+            quantile_values[label] = value
+
+        result: dict[str, float | str] = {
             "distribution": self.label,
             "mean": mean,
             "std": std,
             "skew": skew,
             "kurtosis": kurtosis,
-            "min": 0.0,
-            "max": max_quantile,
         }
+        result.update(quantile_values)
+        return result
 
 
 def truncated_quantile(base_ppf: Callable[[float], float], cdf_zero: float) -> Callable[[float], float]:
@@ -134,7 +152,7 @@ def integrate_straddle_curve(
 
 
 def main(
-    dfs: Sequence[float] = (6.0,),
+    dfs: Sequence[float] = (5.0,),
     include_normal: bool = True,
     include_lognormal: bool = True,
     include_logistic: bool = False,
@@ -151,11 +169,12 @@ def main(
     spot: float = 100.0,
     rate: float = 0.0,
     time_to_maturity: float = 1.0,
-    print_straddles = False, # print straddle prices and vols
+    print_straddles = False, # print straddle prices and implied vols
     plot_terminal_distributions: bool = True,
     plot_implied_vol_markers: bool = False,
     zmin_dist: float = -4.0,
     zmax_dist: float =  4.0,
+    summary_quantiles: Sequence[float] = (0.001, 0.01, 0.5, 0.99, 0.999),
 ) -> None:
     """Drive the quadrature-based straddle valuation experiment."""
     if any(df <= 2 for df in dfs):
@@ -164,6 +183,13 @@ def main(
         raise ValueError("Generalized error powers must be positive.")
     if any(power <= 1 for power in log_generalized_error_powers):
         raise ValueError("Log generalized error powers must exceed 1.")
+
+    if not summary_quantiles:
+        raise ValueError("summary_quantiles cannot be empty.")
+    quantile_list = tuple(sorted({float(q) for q in summary_quantiles}))
+    if any(q < 0.0 or q > 1.0 for q in quantile_list):
+        raise ValueError("All summary quantiles must lie in [0, 1].")
+    summary_quantiles = quantile_list
 
     strikes = np.arange(strike_start, strike_end + strike_step, strike_step)
     discount_factor = math.exp(-rate * time_to_maturity)
@@ -190,6 +216,7 @@ def main(
         ("plot_implied_vol_markers", plot_implied_vol_markers),
         ("zmin_dist", zmin_dist),
         ("zmax_dist", zmax_dist),
+        ("summary_quantiles", ", ".join(f"{q:.3f}" for q in summary_quantiles)),
     ]
     params_df = pd.DataFrame(params, columns=["parameter", "value"])
     print("Simulation parameters:")
@@ -259,7 +286,7 @@ def main(
         quantile_fn = lambda p, power=power, mu=mu, scale=scale: math.exp(stats.gennorm.ppf(p, power, loc=mu, scale=scale))
         distributions.append(QuadDistribution(f"Log Generalized Error power={power:g}", pdf, 0.0, quantile_fn, quad_points=(0.0,)))
 
-    summary_records = [dist.summary() for dist in distributions]
+    summary_records = [dist.summary(summary_quantiles) for dist in distributions]
     summary_df = pd.DataFrame(summary_records)
     print("\nDistribution summary:")
     print(summary_df.to_string(index=False))
