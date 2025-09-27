@@ -11,7 +11,7 @@ import pandas as pd
 from scipy import integrate, stats
 
 from black_scholes import implied_vol_from_straddle
-from xdof_option import (
+from distributions import (
     generalized_error_scale,
     log_generalized_error_parameters,
     log_hyperbolic_secant_parameters,
