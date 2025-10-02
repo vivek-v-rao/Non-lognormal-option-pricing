@@ -8,7 +8,7 @@ from typing import Callable, Dict, Iterable, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy import integrate, stats
+from scipy import integrate, optimize, stats
 
 from black_scholes import implied_vol_from_straddle
 from distributions import (
@@ -45,11 +45,24 @@ class QuadDistribution:
 
     def expected_straddle_payoff(self, strike: float) -> float:
         """Return E[|S-K|] evaluated via quadrature."""
-        payoff = self.cdf_at_zero * abs(strike)
-        lower = 0.0
-        if strike > lower:
-            payoff += self._quad(lambda y: (strike - y) * self.pdf(y), lower, strike)
-        payoff += self._quad(lambda y: (y - strike) * self.pdf(y), max(strike, lower), np.inf)
+        return self.expected_call_payoff(strike) + self.expected_put_payoff(strike)
+
+    def expected_call_payoff(self, strike: float) -> float:
+        """Return E[(S-K)+] including any point mass at zero."""
+        payoff = 0.0
+        if strike < 0.0:
+            payoff += self.cdf_at_zero * (-strike)
+            payoff += self._quad(lambda y: (y - strike) * self.pdf(y), 0.0, np.inf)
+        else:
+            payoff += self._quad(lambda y: (y - strike) * self.pdf(y), max(strike, 0.0), np.inf)
+        return payoff
+
+    def expected_put_payoff(self, strike: float) -> float:
+        """Return E[(K-S)+] including any point mass at zero."""
+        if strike <= 0.0:
+            return 0.0
+        payoff = strike * self.cdf_at_zero
+        payoff += self._quad(lambda y: (strike - y) * self.pdf(y), 0.0, strike)
         return payoff
 
     def raw_moment(self, order: int) -> float:
@@ -112,6 +125,7 @@ class QuadDistribution:
             "kurtosis": kurtosis,
         }
         result.update(quantile_values)
+        result["prob_0"] = self.cdf_at_zero
         return result
 
 
@@ -126,6 +140,75 @@ def truncated_quantile(base_ppf: Callable[[float], float], cdf_zero: float) -> C
     return _quantile
 
 
+def _truncated_mean(
+    builder: Callable[[float], tuple[QuadFunc, float, Callable[[float], float], tuple[float, ...]]],
+    loc: float,
+) -> float:
+    pdf, _cdf_zero, _quantile_fn, quad_points = builder(loc)
+    opts = dict(limit=500, epsabs=1e-8, epsrel=1e-6)
+    if quad_points:
+        points = [p for p in quad_points if 0.0 < p < np.inf]
+        if points:
+            opts["points"] = points
+    result, _ = integrate.quad(lambda y: y * pdf(y), 0.0, np.inf, **opts)
+    return result
+
+
+def calibrate_truncated_location(
+    mean_target: float,
+    initial_loc: float,
+    scale_hint: float,
+    builder: Callable[[float], tuple[QuadFunc, float, Callable[[float], float], tuple[float, ...]]],
+) -> float:
+    """Return a location shift ensuring the truncated mean matches mean_target."""
+    initial_mean = _truncated_mean(builder, initial_loc)
+    if abs(initial_mean - mean_target) <= 1e-8:
+        return initial_loc
+
+    step = max(abs(scale_hint), 1.0)
+    lower = initial_loc
+    upper = initial_loc
+    f_lower = initial_mean - mean_target
+    f_upper = f_lower
+
+    attempts = 0
+    while f_lower > 0.0 and attempts < 50:
+        lower -= step
+        f_lower = _truncated_mean(builder, lower) - mean_target
+        attempts += 1
+
+    attempts = 0
+    while f_upper < 0.0 and attempts < 50:
+        upper += step
+        f_upper = _truncated_mean(builder, upper) - mean_target
+        attempts += 1
+
+    if f_lower > 0.0 or f_upper < 0.0:
+        return initial_loc
+
+    loc = optimize.brentq(
+        lambda value: _truncated_mean(builder, value) - mean_target,
+        lower,
+        upper,
+        xtol=1e-10,
+        rtol=1e-10,
+        maxiter=200,
+    )
+    return loc
+
+
+def build_truncated_distribution(
+    label: str,
+    mean_target: float,
+    initial_loc: float,
+    scale_hint: float,
+    builder: Callable[[float], tuple[QuadFunc, float, Callable[[float], float], tuple[float, ...]]],
+) -> QuadDistribution:
+    loc = calibrate_truncated_location(mean_target, initial_loc, scale_hint, builder)
+    pdf, cdf_zero, quantile_fn, quad_points = builder(loc)
+    return QuadDistribution(label, pdf, cdf_zero, quantile_fn, quad_points)
+
+
 def integrate_straddle_curve(
     distribution: QuadDistribution,
     strikes: np.ndarray,
@@ -137,13 +220,19 @@ def integrate_straddle_curve(
     """Integrate straddle prices across strikes for one distribution."""
     records: list[dict[str, float | str]] = []
     for strike in strikes:
-        payoff = distribution.expected_straddle_payoff(strike)
-        price = discount_factor * payoff
+        call_payoff = distribution.expected_call_payoff(strike)
+        put_payoff = distribution.expected_put_payoff(strike)
+        straddle_payoff = call_payoff + put_payoff
+        call_price = discount_factor * call_payoff
+        put_price = discount_factor * put_payoff
+        price = discount_factor * straddle_payoff
         implied_vol = implied_vol_from_straddle(price, spot, strike, rate, time_to_maturity)
         records.append(
             {
                 "distribution": distribution.label,
                 "strike": strike,
+                "call_price": call_price,
+                "put_price": put_price,
                 "price": price,
                 "implied_vol": implied_vol,
             }
@@ -167,9 +256,11 @@ def main(
     strike_end: float = 120.0,
     strike_step: float = 1.0,
     spot: float = 100.0,
-    rate: float = 0.0,
+    rate: float = 0.10,
     time_to_maturity: float = 1.0,
-    print_straddles = False, # print straddle prices and implied vols
+    enforce_risk_neutral_mean: bool = True,
+    print_call_put: bool = False, # print prices of calls and puts separately
+    print_straddles: bool = False,
     plot_terminal_distributions: bool = True,
     plot_implied_vol_markers: bool = False,
     zmin_dist: float = -4.0,
@@ -193,6 +284,14 @@ def main(
 
     strikes = np.arange(strike_start, strike_end + strike_step, strike_step)
     discount_factor = math.exp(-rate * time_to_maturity)
+    if discount_factor <= 0.0:
+        raise ValueError("Discount factor must be positive. Check rate and time_to_maturity.")
+    risk_neutral_mean = spot / discount_factor
+    mean_target = mean_terminal
+    if enforce_risk_neutral_mean:
+        mean_target = risk_neutral_mean
+    if mean_target <= 0.0:
+        raise ValueError("Resulting mean_target must be positive.")
 
     params = [
         ("dfs", ", ".join(f"{df:g}" for df in dfs)),
@@ -205,6 +304,9 @@ def main(
         ("generalized_error_powers", ", ".join(f"{p:g}" for p in generalized_error_powers) or "none"),
         ("log_generalized_error_powers", ", ".join(f"{p:g}" for p in log_generalized_error_powers) or "none"),
         ("mean_terminal", mean_terminal),
+        ("enforce_risk_neutral_mean", enforce_risk_neutral_mean),
+        ("risk_neutral_mean", risk_neutral_mean),
+        ("mean_target", mean_target),
         ("std_terminal", std_terminal),
         ("spot", spot),
         ("rate", rate),
@@ -212,6 +314,7 @@ def main(
         ("strike_start", strike_start),
         ("strike_end", strike_end),
         ("strike_step", strike_step),
+        ("print_call_put", print_call_put),
         ("plot_terminal_distributions", plot_terminal_distributions),
         ("plot_implied_vol_markers", plot_implied_vol_markers),
         ("zmin_dist", zmin_dist),
@@ -226,19 +329,36 @@ def main(
 
     for df in dfs:
         scale = student_t_scale(std_terminal, df)
-        pdf = lambda x, df=df, scale=scale: 0.0 if x <= 0 else stats.t.pdf(x, df, loc=mean_terminal, scale=scale)
-        cdf_zero = stats.t.cdf(0.0, df, loc=mean_terminal, scale=scale)
-        quantile_fn = truncated_quantile(lambda p, df=df, scale=scale: stats.t.ppf(p, df, loc=mean_terminal, scale=scale), cdf_zero)
-        distributions.append(QuadDistribution(f"Student-t df={df:g}", pdf, cdf_zero, quantile_fn))
+
+        def builder(loc: float, df=df, scale=scale) -> tuple[QuadFunc, float, Callable[[float], float], tuple[float, ...]]:
+            pdf = lambda x, df=df, loc=loc, scale=scale: 0.0 if x <= 0 else stats.t.pdf(x, df, loc=loc, scale=scale)
+            cdf_zero = stats.t.cdf(0.0, df, loc=loc, scale=scale)
+            quantile_fn = truncated_quantile(
+                lambda p, df=df, loc=loc, scale=scale: stats.t.ppf(p, df, loc=loc, scale=scale),
+                cdf_zero,
+            )
+            return pdf, cdf_zero, quantile_fn, ()
+
+        distributions.append(
+            build_truncated_distribution(f"Student-t df={df:g}", mean_target, mean_target, std_terminal, builder)
+        )
 
     if include_normal:
-        pdf = lambda x: 0.0 if x <= 0 else stats.norm.pdf(x, loc=mean_terminal, scale=std_terminal)
-        cdf_zero = stats.norm.cdf(0.0, loc=mean_terminal, scale=std_terminal)
-        quantile_fn = truncated_quantile(lambda p: stats.norm.ppf(p, loc=mean_terminal, scale=std_terminal), cdf_zero)
-        distributions.append(QuadDistribution("Normal", pdf, cdf_zero, quantile_fn))
+        def builder(loc: float) -> tuple[QuadFunc, float, Callable[[float], float], tuple[float, ...]]:
+            pdf = lambda x, loc=loc: 0.0 if x <= 0 else stats.norm.pdf(x, loc=loc, scale=std_terminal)
+            cdf_zero = stats.norm.cdf(0.0, loc=loc, scale=std_terminal)
+            quantile_fn = truncated_quantile(
+                lambda p, loc=loc: stats.norm.ppf(p, loc=loc, scale=std_terminal),
+                cdf_zero,
+            )
+            return pdf, cdf_zero, quantile_fn, ()
+
+        distributions.append(
+            build_truncated_distribution("Normal", mean_target, mean_target, std_terminal, builder)
+        )
 
     if include_lognormal:
-        mu, sigma = lognormal_parameters(mean_terminal, std_terminal)
+        mu, sigma = lognormal_parameters(mean_target, std_terminal)
         scale_param = math.exp(mu)
         pdf = lambda x, sigma=sigma, scale_param=scale_param: 0.0 if x <= 0 else stats.lognorm.pdf(x, s=sigma, scale=scale_param)
         quantile_fn = lambda p, sigma=sigma, scale_param=scale_param: stats.lognorm.ppf(p, s=sigma, scale=scale_param)
@@ -246,42 +366,64 @@ def main(
 
     if include_logistic:
         logistic_scale = std_terminal * math.sqrt(3.0) / math.pi
-        pdf = lambda x, scale=logistic_scale: 0.0 if x <= 0 else stats.logistic.pdf(x, loc=mean_terminal, scale=scale)
-        cdf_zero = stats.logistic.cdf(0.0, loc=mean_terminal, scale=logistic_scale)
-        quantile_fn = truncated_quantile(lambda p, scale=logistic_scale: stats.logistic.ppf(p, loc=mean_terminal, scale=scale), cdf_zero)
-        distributions.append(QuadDistribution("Logistic", pdf, cdf_zero, quantile_fn))
+        def builder(loc: float, scale=logistic_scale) -> tuple[QuadFunc, float, Callable[[float], float], tuple[float, ...]]:
+            pdf = lambda x, loc=loc, scale=scale: 0.0 if x <= 0 else stats.logistic.pdf(x, loc=loc, scale=scale)
+            cdf_zero = stats.logistic.cdf(0.0, loc=loc, scale=scale)
+            quantile_fn = truncated_quantile(
+                lambda p, loc=loc, scale=scale: stats.logistic.ppf(p, loc=loc, scale=scale),
+                cdf_zero,
+            )
+            return pdf, cdf_zero, quantile_fn, ()
+
+        distributions.append(
+            build_truncated_distribution("Logistic", mean_target, mean_target, std_terminal, builder)
+        )
 
     if include_hyperbolic_secant:
         hyp_scale = std_terminal * 2.0 / math.pi
-        pdf = lambda x, scale=hyp_scale: 0.0 if x <= 0 else stats.hypsecant.pdf(x, loc=mean_terminal, scale=scale)
-        cdf_zero = stats.hypsecant.cdf(0.0, loc=mean_terminal, scale=hyp_scale)
-        quantile_fn = truncated_quantile(lambda p, scale=hyp_scale: stats.hypsecant.ppf(p, loc=mean_terminal, scale=scale), cdf_zero)
-        distributions.append(QuadDistribution("Hyperbolic Secant", pdf, cdf_zero, quantile_fn))
+        def builder(loc: float, scale=hyp_scale) -> tuple[QuadFunc, float, Callable[[float], float], tuple[float, ...]]:
+            pdf = lambda x, loc=loc, scale=scale: 0.0 if x <= 0 else stats.hypsecant.pdf(x, loc=loc, scale=scale)
+            cdf_zero = stats.hypsecant.cdf(0.0, loc=loc, scale=scale)
+            quantile_fn = truncated_quantile(
+                lambda p, loc=loc, scale=scale: stats.hypsecant.ppf(p, loc=loc, scale=scale),
+                cdf_zero,
+            )
+            return pdf, cdf_zero, quantile_fn, ()
+
+        distributions.append(
+            build_truncated_distribution("Hyperbolic Secant", mean_target, mean_target, std_terminal, builder)
+        )
 
     for power in generalized_error_powers:
         scale = generalized_error_scale(std_terminal, power)
-        pdf = lambda x, power=power, scale=scale: 0.0 if x <= 0 else stats.gennorm.pdf(x, power, loc=mean_terminal, scale=scale)
-        cdf_zero = stats.gennorm.cdf(0.0, power, loc=mean_terminal, scale=scale)
-        quantile_fn = truncated_quantile(
-            lambda p, power=power, scale=scale: stats.gennorm.ppf(p, power, loc=mean_terminal, scale=scale),
-            cdf_zero,
+        def builder(loc: float, power=power, scale=scale) -> tuple[QuadFunc, float, Callable[[float], float], tuple[float, ...]]:
+            pdf = lambda x, power=power, loc=loc, scale=scale: 0.0 if x <= 0 else stats.gennorm.pdf(x, power, loc=loc, scale=scale)
+            cdf_zero = stats.gennorm.cdf(0.0, power, loc=loc, scale=scale)
+            quantile_fn = truncated_quantile(
+                lambda p, power=power, loc=loc, scale=scale: stats.gennorm.ppf(p, power, loc=loc, scale=scale),
+                cdf_zero,
+            )
+            return pdf, cdf_zero, quantile_fn, ()
+
+        label = f"Generalized Error power={power:g}"
+        distributions.append(
+            build_truncated_distribution(label, mean_target, mean_target, std_terminal, builder)
         )
-        distributions.append(QuadDistribution(f"Generalized Error power={power:g}", pdf, cdf_zero, quantile_fn))
 
     if include_log_logistic:
-        shape, scale_param = loglogistic_parameters(mean_terminal, std_terminal)
+        shape, scale_param = loglogistic_parameters(mean_target, std_terminal)
         pdf = lambda x, shape=shape, scale_param=scale_param: 0.0 if x <= 0 else stats.fisk.pdf(x, shape, loc=0.0, scale=scale_param)
         quantile_fn = lambda p, shape=shape, scale_param=scale_param: stats.fisk.ppf(p, shape, loc=0.0, scale=scale_param)
         distributions.append(QuadDistribution("Log-Logistic", pdf, 0.0, quantile_fn, quad_points=(0.0,)))
 
     if include_log_hyperbolic_secant:
-        mu, scale = log_hyperbolic_secant_parameters(mean_terminal, std_terminal)
+        mu, scale = log_hyperbolic_secant_parameters(mean_target, std_terminal)
         pdf = lambda x, mu=mu, scale=scale: 0.0 if x <= 0 else stats.hypsecant.pdf(math.log(x), loc=mu, scale=scale) / x
         quantile_fn = lambda p, mu=mu, scale=scale: math.exp(stats.hypsecant.ppf(p, loc=mu, scale=scale))
         distributions.append(QuadDistribution("Log Hyperbolic Secant", pdf, 0.0, quantile_fn, quad_points=(0.0,)))
 
     for power in log_generalized_error_powers:
-        mu, scale = log_generalized_error_parameters(mean_terminal, std_terminal, power)
+        mu, scale = log_generalized_error_parameters(mean_target, std_terminal, power)
         pdf = lambda x, power=power, mu=mu, scale=scale: 0.0 if x <= 0 else stats.gennorm.pdf(math.log(x), power, loc=mu, scale=scale) / x
         quantile_fn = lambda p, power=power, mu=mu, scale=scale: math.exp(stats.gennorm.ppf(p, power, loc=mu, scale=scale))
         distributions.append(QuadDistribution(f"Log Generalized Error power={power:g}", pdf, 0.0, quantile_fn, quad_points=(0.0,)))
@@ -296,9 +438,26 @@ def main(
         curve_records.extend(integrate_straddle_curve(dist, strikes, discount_factor, spot, rate, time_to_maturity))
 
     curve_df = pd.DataFrame(curve_records)
+    curve_df["implied_stock"] = curve_df["call_price"] - curve_df["put_price"] + discount_factor * curve_df["strike"]
     if print_straddles:
         print("\nStraddle results:")
-        print(curve_df.to_string(index=False))
+        straddle_view = curve_df[["distribution", "strike", "price", "implied_vol"]]
+        print(straddle_view.to_string(index=False))
+
+    if print_call_put:
+        print("\nCall/Put results:")
+        call_put_view = curve_df[
+            [
+                "distribution",
+                "strike",
+                "implied_vol",
+                "implied_stock",
+                "call_price",
+                "put_price",
+                "price",
+            ]
+        ].rename(columns={"price": "straddle_price"})
+        print(call_put_view.to_string(index=False))
 
     plt.figure(figsize=(9, 5))
     marker = "o" if plot_implied_vol_markers else None
@@ -313,6 +472,8 @@ def main(
 
     if plot_terminal_distributions:
         plt.figure(figsize=(9, 5))
+        overall_left: float | None = None
+        overall_right: float | None = None
         for dist, summary in zip(distributions, summary_records):
             std = summary["std"]
             mean = summary["mean"]
@@ -325,9 +486,23 @@ def main(
                 if (not np.isfinite(right)) or right <= 0.0:
                     right = mean + 6.0 * std if std > 0 else mean
                 right = max(right, strike_end * 1.1, mean + 3.0 * std if std > 0 else right)
+            overall_left = left if overall_left is None else min(overall_left, left)
+            overall_right = right if overall_right is None else max(overall_right, right)
             grid = np.linspace(left, right, 400)
             density = [dist.pdf(x) for x in grid]
-            plt.plot(grid, density, linewidth=1.5, label=dist.label)
+            (line,) = plt.plot(grid, density, linewidth=1.5, label=dist.label)
+            if dist.cdf_at_zero > 0.0:
+                plt.vlines(
+                    0.0,
+                    0.0,
+                    dist.cdf_at_zero,
+                    colors=line.get_color(),
+                    linestyles="--",
+                    linewidth=1.2,
+                )
+        ax = plt.gca()
+        if overall_left is not None and overall_right is not None:
+            ax.set_xlim(overall_left, overall_right)
         plt.xlabel("Terminal Price")
         plt.ylabel("Density")
         plt.title("Terminal Price Densities (Quadrature)")
