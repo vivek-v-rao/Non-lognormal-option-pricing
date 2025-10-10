@@ -256,7 +256,7 @@ def main(
     strike_end: float = 120.0,
     strike_step: float = 1.0,
     spot: float = 100.0,
-    rate: float = 0.10,
+    rate: float = 0.0,
     time_to_maturity: float = 1.0,
     enforce_risk_neutral_mean: bool = True,
     print_call_put: bool = False, # print prices of calls and puts separately
@@ -514,4 +514,5 @@ def main(
 
 
 if __name__ == "__main__":
+
     main()
